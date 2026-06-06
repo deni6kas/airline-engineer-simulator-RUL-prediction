@@ -1,0 +1,29 @@
+---
+description: Browser pixel-art simulation game with time-series math model
+alwaysApply: true
+---
+
+# Airline Engineer Simulator — Architecture Rules
+
+## Stack
+- Browser-only: Vite + TypeScript
+- Rendering: Phaser 3 or PixiJS (pixel art, nearest-neighbor scaling)
+- Charts: lightweight-charts or Chart.js for time-series UI
+- Math model: pure TypeScript in `src/simulation-core/` (no framework imports)
+
+## Separation of Concerns
+- `src/simulation-core/` — time-series logic, tick updates, balance formulas (pure functions, Vitest-testable)
+- `src/game/` — Phaser/PixiJS scenes: render state only, no business logic
+- `src/ui/` — React or DOM panels, charts, HUD
+- `src/worker/` — Web Worker for heavy simulation steps (optional)
+
+## Pixel Art
+- Sprite sizes: multiples of 8 or 16 (16x16, 32x32)
+- No sub-pixel movement for characters
+- Export sprites as PNG with transparency
+- Phaser texture filter: NEAREST
+
+## Time Series Model
+- Prototype in Python via jupyter-kernel MCP, then port to TypeScript
+- Use fixed simulation timestep (decouple from frame rate)
+- Keep deterministic RNG for reproducible tests

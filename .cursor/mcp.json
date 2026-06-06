@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "jupyter-kernel": {
+      "command": "C:\\Users\\Lenovo\\AppData\\Roaming\\Python\\Python313\\Scripts\\jupyter-kernel-mcp.exe",
+      "args": []
+    },
+    "pixel-art": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "pxcli-mcp",
+        "--export-dir",
+        "./assets/sprites"
+      ]
+    }
+  }
+}

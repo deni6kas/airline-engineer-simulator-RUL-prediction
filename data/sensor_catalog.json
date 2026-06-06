@@ -1,0 +1,18 @@
+{
+  "egt": {
+    "label": "Exhaust Temp (LPT out)",
+    "unit": "deg R"
+  },
+  "core_speed": {
+    "label": "Core Speed (Nc)",
+    "unit": "rpm"
+  },
+  "hpc_pressure": {
+    "label": "Compressor Press (Ps30)",
+    "unit": "psia"
+  },
+  "corr_core_speed": {
+    "label": "Corr. Core Speed (NRc)",
+    "unit": "rpm"
+  }
+}
