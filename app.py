@@ -12,6 +12,7 @@ from io import BytesIO
 
 import streamlit as st
 from PIL import Image
+from streamlit_autorefresh import st_autorefresh
 from streamlit_image_coordinates import streamlit_image_coordinates
 
 from game import config, data_loader, economics, scene, state, charts
@@ -111,7 +112,6 @@ def render_notice():
     st.button("OK", key="notice_ok", on_click=clear_notice)
 
 
-@st.fragment(run_every=1)
 def render_fleet_unavailable_overlay():
     if st.session_state.get("fleet_unavailable_until") is None:
         return
@@ -339,13 +339,36 @@ def render_map(fleet):
 
 
 # ---------------------------------------------------------------- CONSOLE
-@st.fragment(run_every=1)
-def render_live_departure_timer(aid: str):
+def _live_tick_needed() -> bool:
+    if st.session_state.get("screen") != "airport":
+        return False
+    if st.session_state.get("game_over"):
+        return False
+    if state.notification_active():
+        return False
+    if st.session_state.get("decision_deadline") is not None:
+        return True
+    return st.session_state.get("fleet_unavailable_until") is not None
+
+
+def _sync_timer_state(aid: str | None) -> None:
     if state.notification_active():
         state.pause_timer()
     elif st.session_state.get("timer_paused_at") is not None:
         state.resume_timer()
+    if not aid:
+        return
+    if (
+        state.decision_time_expired()
+        and st.session_state.get("_expired_for") != aid
+        and not state.notification_active()
+        and not st.session_state.get("_pending_auto_flight")
+    ):
+        st.session_state["_expired_for"] = aid
+        st.session_state["_pending_auto_flight"] = aid
 
+
+def render_live_departure_timer(aid: str):
     remaining = state.remaining_seconds()
     destination = st.session_state.get("destination") or "Unknown"
     paused = st.session_state.get("timer_paused_at") is not None
@@ -359,16 +382,6 @@ def render_live_departure_timer(aid: str):
       </div>
       <div class="timer">{timer_text}</div>
     </div>""", unsafe_allow_html=True)
-    if (
-        state.decision_time_expired()
-        and st.session_state.get("_expired_for") != aid
-        and not state.notification_active()
-        and not st.session_state.get("_pending_auto_flight")
-    ):
-        st.session_state["_expired_for"] = aid
-        st.session_state["_pending_auto_flight"] = aid
-
-
 def render_departure_brief(aid: str, is_current: bool):
     if not is_current:
         current = _display_name(st.session_state.get("current_departure"))
@@ -643,6 +656,9 @@ def _process_pending_auto_flight() -> None:
 
 
 def render_airport_screen():
+    if _live_tick_needed():
+        st_autorefresh(interval=1000, key="game_tick")
+    _sync_timer_state(st.session_state.get("current_departure"))
     _process_pending_auto_flight()
     render_hud()
     fleet = list(data_loader.fleet_ids())
@@ -655,7 +671,6 @@ def render_airport_screen():
     aid = st.session_state["selected_aircraft"]
     if aid:
         render_console(aid)
-    _process_pending_auto_flight()
     render_report()
 
 

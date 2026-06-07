@@ -15,6 +15,10 @@ CSS = f"""
 }}
 
 .stApp {{ background: var(--bg); }}
+.stApp, .stApp * {{
+  animation: none !important;
+  transition: none !important;
+}}
 #MainMenu, header, footer {{ visibility: hidden; }}
 .block-container {{ padding: 0.6rem 1.1rem 2rem 1.1rem; max-width: 1400px; }}
 
@@ -98,10 +102,9 @@ CSS = f"""
 }}
 .departure-card.ok .timer {{ color:var(--safe); }}
 .departure-card.warn .timer {{ color:var(--warn); }}
-.departure-card.danger .timer {{ color:var(--crit); animation:pulseTimer .8s steps(2,end) infinite; }}
+.departure-card.danger .timer {{ color:var(--crit); }}
 .departure-card.paused .timer {{ color:var(--dim); }}
 .departure-card.muted {{ color:var(--dim); }}
-@keyframes pulseTimer {{ 50% {{ filter:brightness(1.7); }} }}
 
 /* ---- required report overlay ---- */
 .report-overlay {{
