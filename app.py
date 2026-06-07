@@ -27,6 +27,16 @@ SENSOR_ICONS = {
 }
 BADGE = {config.STATUS_SAFE: "safe", config.STATUS_WARNING: "warn",
          config.STATUS_CRITICAL: "crit"}
+def _display_name(aircraft_id: str | None) -> str:
+    if not aircraft_id:
+        return "—"
+    return config.aircraft_display_name(aircraft_id)
+
+
+def _rerun_app() -> None:
+    st.rerun(scope="app")
+
+
 ADVICE = {
     config.STATUS_SAFE: ("safe", "Двигатель в норме. Можно продолжать полёты и "
                                   "выжимать ресурс."),
@@ -37,9 +47,36 @@ ADVICE = {
 }
 
 
+def is_revealed(aid: str, kind: str) -> bool:
+    key = "revealed_rul" if kind == "rul" else "revealed_advice"
+    return bool(st.session_state.get(key, {}).get(aid))
+
+
 def money(v: int) -> str:
     sign = "-" if v < 0 else ""
     return f"{sign}${abs(v):,}"
+
+
+def start_campaign(mode: str) -> None:
+    st.session_state["tutorial_prompt"] = False
+    st.session_state["pending_mode"] = None
+    state.start_campaign(mode)
+
+
+def clear_notice() -> None:
+    st.session_state["notice"] = None
+    state.resume_timer()
+
+
+def close_report() -> None:
+    st.session_state["report"] = None
+    state.resume_timer()
+
+
+def report_to_summary() -> None:
+    st.session_state["report"] = None
+    state.resume_timer()
+    st.session_state["screen"] = "summary"
 
 
 @st.cache_data(show_spinner=False)
@@ -54,10 +91,54 @@ def _sprite_b64(name: str, max_side: int = 150) -> str:
     return base64.b64encode(buf.getvalue()).decode()
 
 
+def _fleet_card_sprite(aircraft_id: str) -> str:
+    sprites = config.AIRCRAFT_SPRITES.get(aircraft_id, config.DEFAULT_PLANE_SPRITES)
+    return sprites["card"]
+
+
+def render_notice():
+    notice = st.session_state.get("notice")
+    if not notice:
+        return
+    state.pause_timer()
+    st.markdown(f"""
+    <div class="notice-overlay">
+      <div class="notice-toast">
+        <b>Уведомление</b><br>{notice}
+      </div>
+    </div>""", unsafe_allow_html=True)
+    st.markdown("<span id='notice-ok-anchor'></span>", unsafe_allow_html=True)
+    st.button("OK", key="notice_ok", on_click=clear_notice)
+
+
+@st.fragment(run_every=1)
+def render_fleet_unavailable_overlay():
+    if st.session_state.get("fleet_unavailable_until") is None:
+        return
+    if st.session_state.get("report"):
+        state.restart_fleet_unavailable_wait()
+        return
+    remaining = state.fleet_unavailable_remaining()
+    if remaining <= 0:
+        st.session_state["_pending_fleet_resume"] = True
+        return
+    st.markdown(f"""
+    <div class="fleet-wait-overlay">
+      <div class="fleet-wait-card">
+        <h3>Все рейсы поставлены на паузу</h3>
+        <p>Самолеты авиакомпании недоступны, именно поэтому советую вам копить
+        на private jet, мне лично нравится Gulfstream G700. Вот у Дрейка вообще
+        Boeing 767, хочу как Дрейк...</p>
+        <div class="fleet-wait-timer">{remaining:02d}s</div>
+        <div class="fleet-wait-sub">Ожидание обусловлено отсутствием доступных рейсов.</div>
+      </div>
+    </div>""", unsafe_allow_html=True)
+
+
 # ---------------------------------------------------------------- HUD
 def render_hud():
     s = st.session_state
-    sel = s["selected_aircraft"] or "—"
+    sel = _display_name(s["selected_aircraft"])
     variant = config.MODEL_VARIANTS[s["mode"]]["label"]
     xp_pct = int(100 * s["xp"] / s["xp_next"])
     st.markdown(f"""
@@ -116,13 +197,62 @@ def render_lobby():
         k1.markdown(f"<div class='kpi'><div class='k'>Стартовый бюджет</div>"
                     f"<div class='v' style='color:var(--gold)'>"
                     f"{money(config.START_BUDGET)}</div></div>", unsafe_allow_html=True)
+        fleet_count = len(data_loader.fleet_ids())
+        fleet_word = "борта" if fleet_count == 3 else "бортов"
         k2.markdown(f"<div class='kpi'><div class='k'>Флот PADII</div>"
-                    f"<div class='v'>{len(data_loader.fleet_ids())} бортов</div></div>",
+                    f"<div class='v'>{fleet_count} {fleet_word}</div></div>",
                     unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("▶  START CAMPAIGN", type="primary", use_container_width=True):
-            state.start_campaign(mode)
+            st.session_state["pending_mode"] = mode
+            st.session_state["tutorial_prompt"] = True
+            st.rerun()
+
+        if st.session_state.get("tutorial_prompt"):
+            pending_mode = st.session_state.get("pending_mode") or mode
+            st.markdown("""
+            <div class='panel tutorial-card'>
+              <h4>Перед стартом</h4>
+              <p>Хотите пройти короткое обучение-гайд? Оно покажет, где покупать
+              RUL, где читать сенсоры, как работает таймер и какие кнопки отвечают
+              за рейс / ТО.</p>
+            </div>""", unsafe_allow_html=True)
+            t1, t2 = st.columns(2)
+            if t1.button("Пройти обучение", type="primary", use_container_width=True):
+                st.session_state["screen"] = "tutorial"
+                st.session_state["mode"] = pending_mode
+                st.session_state["tutorial_prompt"] = False
+                st.rerun()
+            if t2.button("Пропустить", use_container_width=True):
+                start_campaign(pending_mode)
+                st.rerun()
+
+
+def render_tutorial():
+    st.markdown("""
+    <div class="lobby-hero">
+      <div class="t">TRAINING GUIDE</div>
+      <div class="s">Короткий briefing перед первой сменой инженера</div>
+    </div>
+    <div class="panel tutorial-card">
+      <h4>Как играть</h4>
+      <p><b>1. Outbound Flight</b> — сверху в консоли показан текущий рейс,
+      город назначения и таймер 20 секунд.</p>
+      <p><b>2. Графики</b> — RUL/ML prediction и сенсоры доступны сразу.
+      Истинный RUL раскрывается только после ТО или отказа.</p>
+      <p><b>3. Платные подсказки</b> — точное Predicted RUL и System Advice
+      покупаются отдельно по $50,000. Если денег не хватает, появится уведомление.</p>
+      <p><b>4. Решение</b> — отправьте рейс или снимите двигатель на ТО.
+      После таймера ТО блокируется, и рейс уходит поздно.</p>
+      <p><b>5. Бюджет</b> — компания не может уйти в минус. Для ТО и аварийных
+      штрафов это может завершить кампанию.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c2:
+        if st.button("Понятно, начать кампанию", type="primary", use_container_width=True):
+            start_campaign(st.session_state.get("mode", "baseline"))
             st.rerun()
 
 
@@ -134,10 +264,11 @@ def render_fleet_panel(fleet):
         s = state.ac_state(aid)
         ep = s["status"]
         if ep == "active":
-            stt = state.status(aid)
-            rul = f"{state.predicted_rul(aid):.0f}"
+            revealed = is_revealed(aid, "rul")
+            stt = state.status(aid) if revealed else config.STATUS_WARNING
+            rul = f"{state.predicted_rul(aid):.0f}" if revealed else "??"
         elif ep == "maintained":
-            stt, rul = config.STATUS_SAFE, "TO"
+            stt, rul = config.STATUS_WARNING, "TO"
         else:
             stt, rul = config.STATUS_CRITICAL, "✕"
         col = config.COL[{"Safe": "safe", "Warning": "warning",
@@ -149,10 +280,10 @@ def render_fleet_panel(fleet):
         st.markdown(f"""
         <div class="fleet-card {sel}">
           <div class="fleet-row">
-            <img class="thumb" src="data:image/png;base64,{_sprite_b64('small_plane.png')}"/>
+            <img class="thumb" src="data:image/png;base64,{_sprite_b64(_fleet_card_sprite(aid))}"/>
             <div class="fleet-info">
               <div class="fleet-top">
-                <span class="fleet-id">{aid}</span>
+                <span class="fleet-id">{_display_name(aid)}</span>
                 <span class="fleet-rul" style="color:{col}">{rul}</span>
               </div>
               <div class="fleet-sub">{sub}</div>
@@ -174,11 +305,20 @@ def render_map(fleet):
     status_map, ep_map = {}, {}
     for aid in fleet:
         ep_map[aid] = state.ac_state(aid)["status"]
-        status_map[aid] = state.status(aid)
+        if ep_map[aid] == "maintained":
+            status_map[aid] = config.STATUS_WARNING
+        elif ep_map[aid] == "crashed":
+            status_map[aid] = config.STATUS_CRITICAL
+        else:
+            status_map[aid] = state.status(aid)
     img, hitboxes = scene.render_airport(
         fleet, st.session_state["selected_aircraft"], status_map, ep_map)
 
-    val = streamlit_image_coordinates(img, key="airport_map")
+    if st.session_state.get("report"):
+        st.image(img, use_container_width=True)
+        val = None
+    else:
+        val = streamlit_image_coordinates(img, key="airport_map", use_column_width=True)
     if val is not None and val.get("x") is not None:
         # the component reports click + displayed image width; rescale clicks
         # back into native scene coordinates so hit-testing is scale-proof.
@@ -199,6 +339,50 @@ def render_map(fleet):
 
 
 # ---------------------------------------------------------------- CONSOLE
+@st.fragment(run_every=1)
+def render_live_departure_timer(aid: str):
+    if state.notification_active():
+        state.pause_timer()
+    elif st.session_state.get("timer_paused_at") is not None:
+        state.resume_timer()
+
+    remaining = state.remaining_seconds()
+    destination = st.session_state.get("destination") or "Unknown"
+    paused = st.session_state.get("timer_paused_at") is not None
+    cls = "paused" if paused else "danger" if remaining <= 5 else "warn" if remaining <= 10 else "ok"
+    timer_text = "PAUSE" if paused else f"{remaining:02d}s"
+    st.markdown(f"""
+    <div class="departure-card {cls}">
+      <div>
+        <b>OUTBOUND FLIGHT</b><br>
+        PADII dispatch → <span>{destination}</span>
+      </div>
+      <div class="timer">{timer_text}</div>
+    </div>""", unsafe_allow_html=True)
+    if (
+        state.decision_time_expired()
+        and st.session_state.get("_expired_for") != aid
+        and not state.notification_active()
+        and not st.session_state.get("_pending_auto_flight")
+    ):
+        st.session_state["_expired_for"] = aid
+        st.session_state["_pending_auto_flight"] = aid
+
+
+def render_departure_brief(aid: str, is_current: bool):
+    if not is_current:
+        current = _display_name(st.session_state.get("current_departure"))
+        st.markdown(f"""
+        <div class="departure-card muted">
+          <b>OUTBOUND QUEUE</b><br>
+          Сейчас в обработке: <span>{current}</span>. Этот борт можно осмотреть,
+          но решение принимается только по текущему рейсу.
+        </div>""", unsafe_allow_html=True)
+        return
+
+    render_live_departure_timer(aid)
+
+
 def render_console(aid):
     s = state.ac_state(aid)
     meta = data_loader.load_metadata().set_index("aircraft_id").loc[aid]
@@ -206,12 +390,16 @@ def render_console(aid):
     pred = state.predicted_rul(aid)
     stt = state.status(aid)
     health = int(min(100, max(0, pred / 1.4)))
+    is_current = aid == st.session_state.get("current_departure")
+    rul_revealed = is_revealed(aid, "rul") or done
+    advice_revealed = is_revealed(aid, "advice") or done
 
-    head = (f"ENGINE TELEMETRY — {aid} — {meta['engine_model']} "
+    head = (f"ENGINE TELEMETRY — {_display_name(aid)} — {meta['engine_model']} "
             f"({meta['engine_id']})")
     st.markdown(f"<div class='panel'><h4>{head}</h4>", unsafe_allow_html=True)
+    render_departure_brief(aid, is_current)
 
-    left, mid, right = st.columns([1.15, 2.1, 1.25])
+    left, mid = st.columns([1.1, 2.4])
 
     # --- left: metrics + advice
     with left:
@@ -220,29 +408,54 @@ def render_console(aid):
                     f"<div class='v'>{s['cycle']}</div></div>", unsafe_allow_html=True)
         rcol = config.COL[{"Safe": "safe", "Warning": "warning",
                            "Critical": "critical"}[stt]]
-        m2.markdown(f"<div class='metric'><div class='k'>Predicted RUL</div>"
-                    f"<div class='v big' style='color:{rcol}'>{pred:.0f}</div>"
-                    f"<div class='k'>cycles</div></div>", unsafe_allow_html=True)
-        st.markdown(f"<div style='margin:8px 0'><span class='badge {BADGE[stt]}'>"
-                    f"{stt.upper()}</span> &nbsp;"
-                    f"<span class='fleet-sub'>Health {health}%</span></div>",
-                    unsafe_allow_html=True)
-        acls, atxt = ADVICE[stt]
-        st.markdown(f"<div class='advice {acls}'><b>System Advice</b><br>{atxt}</div>",
-                    unsafe_allow_html=True)
+        if rul_revealed:
+            m2.markdown(f"<div class='metric'><div class='k'>Predicted RUL</div>"
+                        f"<div class='v big' style='color:{rcol}'>{pred:.0f}</div>"
+                        f"<div class='k'>cycles</div></div>", unsafe_allow_html=True)
+        else:
+            m2.markdown("<div class='metric locked'><div class='k'>Predicted RUL</div>"
+                        "<div class='v big'>LOCKED</div>"
+                        "<div class='k'>buy for $50k</div></div>", unsafe_allow_html=True)
+            if is_current and st.button(f"Купить Predicted RUL −{money(config.HINT_COST)}",
+                                        key=f"buy_rul_{aid}", use_container_width=True):
+                economics.buy_rul_hint(aid)
+                st.rerun()
+
+        if advice_revealed:
+            st.markdown(f"<div style='margin:8px 0'><span class='badge {BADGE[stt]}'>"
+                        f"{stt.upper()}</span> &nbsp;"
+                        f"<span class='fleet-sub'>Health {health}%</span></div>",
+                        unsafe_allow_html=True)
+            acls, atxt = ADVICE[stt]
+            st.markdown(f"<div class='advice {acls}'><b>System Advice</b><br>{atxt}</div>",
+                        unsafe_allow_html=True)
+        else:
+            st.markdown("<div style='margin:8px 0'><span class='badge locked-badge'>"
+                        "STATUS LOCKED</span></div>", unsafe_allow_html=True)
+            st.markdown("<div class='advice locked-advice'><b>System Advice</b><br>"
+                        "Текстовая подсказка скрыта. Решайте по графикам сенсоров "
+                        "или купите консультацию ML-инженера.</div>",
+                        unsafe_allow_html=True)
+            if is_current and st.button(f"Купить текстовую подсказку −{money(config.HINT_COST)}",
+                                        key=f"buy_advice_{aid}", use_container_width=True):
+                economics.buy_advice_hint(aid)
+                st.rerun()
 
     # --- middle: RUL chart
     with mid:
         pred_df = data_loader.prediction_series(aid, st.session_state["mode"], s["cycle"])
-        fig = charts.rul_chart(pred_df, reveal_truth=done)
+        fig = charts.rul_chart(pred_df, reveal_truth=done, height=330)
         st.plotly_chart(fig, use_container_width=True,
                         config={"displayModeBar": False}, key=f"rul_{aid}")
 
-    # --- right: sensors (grid OR detail) + action center
-    with right:
+    # --- bottom: sensor controls + actions (wide, not cramped on the side)
+    st.markdown("<div class='console-bottom'>", unsafe_allow_html=True)
+    sensors_col, actions_col = st.columns([2.2, 1.2])
+    with sensors_col:
         render_sensor_area(aid)
-        st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+    with actions_col:
         render_action_center(aid, done)
+    st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -252,49 +465,88 @@ def render_sensor_area(aid):
     catalog = data_loader.load_sensor_catalog()
     keys = list(catalog.keys())
 
-    if st.session_state["sensor_mode"] == "detail" and st.session_state["selected_sensor"]:
-        key = st.session_state["selected_sensor"]
-        if st.button("◀ Back", key="sensor_back"):
-            st.session_state["sensor_mode"] = "grid"
-            st.rerun()
-        df = data_loader.sensor_series(aid, key, s["cycle"])
-        fig = charts.sensor_chart(df, catalog[key]["label"], height=150)
-        st.plotly_chart(fig, use_container_width=True,
-                        config={"displayModeBar": False}, key=f"sens_{aid}_{key}")
-    else:
-        st.markdown("<div class='sensor-zone' style='font-size:10px;color:var(--dim);"
-                    "text-transform:uppercase'>Sensors</div>", unsafe_allow_html=True)
-        cols = st.columns(2)
-        for i, key in enumerate(keys):
-            with cols[i % 2]:
-                if st.button(f"{SENSOR_ICONS.get(key,'•')}\n{catalog[key]['label']}",
-                             key=f"sensor_{key}", use_container_width=True):
-                    st.session_state["selected_sensor"] = key
-                    st.session_state["sensor_mode"] = "detail"
-                    st.rerun()
+    st.markdown("<div class='sensor-zone' style='font-size:10px;color:var(--dim);"
+                "text-transform:uppercase'>Sensors</div>", unsafe_allow_html=True)
+    cols = st.columns(2)
+    for i, key in enumerate(keys):
+        with cols[i % 2]:
+            selected = " ✓" if key == st.session_state.get("selected_sensor") else ""
+            if st.button(f"{SENSOR_ICONS.get(key,'•')}\n{catalog[key]['label']}{selected}",
+                         key=f"sensor_{key}", use_container_width=True):
+                st.session_state["selected_sensor"] = key
+                st.session_state["sensor_mode"] = "detail"
+                st.rerun()
+
+    key = st.session_state.get("selected_sensor") or keys[0]
+    df = data_loader.sensor_series(aid, key, s["cycle"]).tail(
+        config.SENSOR_WINDOW_CYCLES
+    )
+    fig = charts.sensor_chart(
+        df,
+        catalog[key]["label"],
+        window=config.SENSOR_WINDOW_CYCLES,
+        height=380,
+    )
+    st.plotly_chart(fig, use_container_width=True,
+                    config={"displayModeBar": False}, key=f"sens_{aid}_{key}")
 
 
 def render_action_center(aid, done):
     st.markdown("<div style='font-size:10px;color:var(--dim);text-transform:uppercase'>"
                 "Action Center</div>", unsafe_allow_html=True)
-    if done:
-        st.info("Эпизод по этому борту завершён. Выберите другой самолёт.")
+    if st.session_state.get("game_over"):
+        st.error("Кампания завершена: бюджет не может уйти в минус.")
+        st.markdown("<span id='summary-anchor'></span>", unsafe_allow_html=True)
+        if st.button("📊 Итоги кампании", use_container_width=True, key="summary_game_over"):
+            st.session_state["screen"] = "summary"
+            st.rerun()
+        return
+    ac = state.ac_state(aid)
+    if ac["status"] == "maintained":
+        turns = int(ac.get("service_turns_remaining", 0))
+        st.info(
+            f"Борт на техническом обслуживании. Осталось кругов: {turns}. "
+            "Выберите другой самолёт или дождитесь возвращения в строй."
+        )
         return
 
+    if done:
+        st.info("Эпизод по этому борту завершён. Выберите другой самолёт.")
+        st.markdown("<span id='summary-anchor'></span>", unsafe_allow_html=True)
+        if st.button("📊 Завершить и посмотреть итоги",
+                     use_container_width=True, key="summary_done"):
+            st.session_state["screen"] = "summary"
+            st.rerun()
+        return
+
+    if aid != st.session_state.get("current_departure"):
+        st.info("Этот борт не первый в очереди. Дождитесь его outbound slot.")
+        return
+
+    expired = state.decision_time_expired()
+    if expired:
+        st.error("Время решения вышло. ТО уже недоступно: рейс уходит без дополнительной подготовки.")
+
     st.markdown("<span id='flight-anchor'></span>", unsafe_allow_html=True)
-    if st.button(f"✈  CONTINUE FLIGHT  +{money(config.FLIGHT_REVENUE)[1:]}",
+    flight_label = "✈  DISPATCH LATE" if expired else f"✈  CONTINUE FLIGHT  +{money(config.FLIGHT_REVENUE)[1:]}"
+    if st.button(flight_label,
                  type="primary", use_container_width=True, key="continue_flight"):
-        economics.continue_flight(aid)
-        st.rerun()
+        report = economics.continue_flight(aid)
+        if report is None:
+            st.rerun()
 
     st.markdown("<span id='maint-anchor'></span>", unsafe_allow_html=True)
     if st.button(f"🔧  SEND TO MAINTENANCE  −$50,000",
-                 use_container_width=True, key="maintenance"):
+                 use_container_width=True, key="maintenance", disabled=expired):
         economics.send_to_maintenance(aid)
-        st.rerun()
 
     st.markdown("<div class='fleet-sub' style='margin-top:6px'>Следующий рейс "
                 "уменьшит истинный ресурс на 1 цикл.</div>", unsafe_allow_html=True)
+    st.markdown("<span id='summary-anchor'></span>", unsafe_allow_html=True)
+    if st.button("📊 Завершить и посмотреть итоги",
+                 use_container_width=True, key="summary_action"):
+        st.session_state["screen"] = "summary"
+        st.rerun()
 
 
 # ---------------------------------------------------------------- REPORT
@@ -302,8 +554,9 @@ def render_report():
     rep = st.session_state.get("report")
     if not rep:
         return
+    state.pause_timer()
     cls = rep["result"]
-    rows = (f"<b>Aircraft:</b> {rep['aircraft_id']} &nbsp;·&nbsp; "
+    rows = (f"<b>Aircraft:</b> {_display_name(rep['aircraft_id'])} &nbsp;·&nbsp; "
             f"<b>Final cycle:</b> {rep['final_cycle']}<br>"
             f"<b>Predicted RUL (на момент решения):</b> {rep['predicted_rul']}<br>"
             f"<b>True RUL (раскрыт):</b> {rep['true_rul']}<br>"
@@ -311,20 +564,22 @@ def render_report():
     if rep["wasted_revenue"]:
         rows += (f"<br><b>Потеряно выручки:</b> ~{money(-rep['wasted_revenue'])[1:]} "
                  f"({rep['true_rul']} рейсов × $5,000)")
+    warning_icon = "⚠ " if cls in {"crash", "telemetry_end", "bankrupt"} else ""
     st.markdown(f"""
-    <div class="report {cls}">
-      <h3>{'⚠ ' if cls=='crash' else ''}{rep['title']}</h3>
-      <p style="color:var(--ink);font-size:14px;line-height:1.6">{rep['text']}</p>
-      <p style="color:var(--dim);font-size:13px;line-height:1.7">{rows}</p>
+    <div class="report-overlay">
+      <div class="report report-modal {cls}">
+        <h3>{warning_icon}{rep['title']}</h3>
+        <p style="color:var(--ink);font-size:14px;line-height:1.6">{rep['text']}</p>
+        <p style="color:var(--dim);font-size:13px;line-height:1.7">{rows}</p>
+        <div class="report-required">
+          Уведомление обязательно к прочтению: закройте его, чтобы вернуться к аэропорту.
+        </div>
+      </div>
     </div>""", unsafe_allow_html=True)
-    c1, c2, _ = st.columns([1, 1, 3])
-    if c1.button("✓ Понятно", type="primary"):
-        st.session_state["report"] = None
-        st.rerun()
-    if c2.button("📊 Итоги кампании"):
-        st.session_state["report"] = None
-        st.session_state["screen"] = "summary"
-        st.rerun()
+    st.markdown("<span id='report-ok-anchor'></span>", unsafe_allow_html=True)
+    st.button("✓ Понятно", type="primary", key="report_ok", on_click=close_report)
+    st.markdown("<span id='report-summary-anchor'></span>", unsafe_allow_html=True)
+    st.button("📊 Итоги кампании", key="report_summary", on_click=report_to_summary)
 
 
 # ---------------------------------------------------------------- SUMMARY
@@ -381,9 +636,15 @@ def render_summary():
 
 
 # ---------------------------------------------------------------- ROUTER
+def _process_pending_auto_flight() -> None:
+    pending = st.session_state.pop("_pending_auto_flight", None)
+    if pending and not state.notification_active():
+        economics.continue_flight(pending)
+
+
 def render_airport_screen():
+    _process_pending_auto_flight()
     render_hud()
-    render_report()
     fleet = list(data_loader.fleet_ids())
     top = st.columns([3, 1])
     with top[0]:
@@ -394,23 +655,25 @@ def render_airport_screen():
     aid = st.session_state["selected_aircraft"]
     if aid:
         render_console(aid)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    cc = st.columns([3, 1])
-    with cc[1]:
-        if st.button("📊 Завершить и посмотреть итоги", use_container_width=True):
-            st.session_state["screen"] = "summary"
-            st.rerun()
+    _process_pending_auto_flight()
+    render_report()
 
 
 def main():
+    if st.session_state.pop("_pending_fleet_resume", False):
+        state.finish_fleet_unavailable_wait()
+        _rerun_app()
     screen = st.session_state["screen"]
     if screen == "lobby":
         render_lobby()
+    elif screen == "tutorial":
+        render_tutorial()
     elif screen == "summary":
         render_summary()
     else:
         render_airport_screen()
+    render_notice()
+    render_fleet_unavailable_overlay()
 
 
 main()

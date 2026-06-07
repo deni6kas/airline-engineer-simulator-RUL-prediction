@@ -6,6 +6,7 @@ from pathlib import Path
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_DIR / "data"
 ASSETS_DIR = PROJECT_DIR / "assets"
+SCENE_LAYOUT_PATH = ASSETS_DIR / "scene_layout.json"
 
 GAME_TITLE = "PADII RUL Engineer"
 GAME_TAGLINE = "Прими инженерные решения на основе прогноза RUL"
@@ -15,6 +16,45 @@ START_BUDGET = 100_000
 FLIGHT_REVENUE = 5_000
 MAINTENANCE_COST = 50_000
 CRASH_PENALTY = 5_000_000
+HINT_COST = 50_000
+DECISION_SECONDS = 20
+MAINTENANCE_TURNS = 5
+FLEET_UNAVAILABLE_SECONDS = 60
+
+DESTINATIONS = [
+    "Berlin", "Madrid", "Rome", "Dubai", "Istanbul", "Prague",
+    "Lisbon", "Vienna", "Warsaw", "Helsinki", "Athens", "Doha",
+]
+
+DEFAULT_PLANE_SPRITES = {
+    "active": "big_plane.png",
+    "maintained": "plane_being_fixed.png",
+    "crashed": "crashed_plane.png",
+    "card": "small_plane.png",
+}
+
+AIRCRAFT_DISPLAY_NAMES = {
+    "PADII-202": "AirDrake",
+}
+
+# PADII-202 is the exclusive AirDrake VIP jet.
+AIRCRAFT_SPRITES = {
+    "PADII-202": {
+        "active": "airdrake.png",
+        "maintained": "airdrake_being_fixed.png",
+        "crashed": "airdrake_crashed.png",
+        "card": "airdrake.png",
+    },
+}
+
+AIRCRAFT_DESTINATIONS = {
+    "PADII-202": "Toronto",
+}
+
+
+def aircraft_display_name(aircraft_id: str) -> str:
+    return AIRCRAFT_DISPLAY_NAMES.get(aircraft_id, aircraft_id)
+
 
 # --- RUL status thresholds (on PREDICTED rul) ------------------------------
 SAFE_MIN = 20          # RUL > 20  -> Safe
@@ -78,6 +118,7 @@ PARKING_SPOTS = [
 ]
 
 PLANE_WIDTH = 236   # on-map big_plane width in px
+SENSOR_WINDOW_CYCLES = 28  # detail chart focuses on the recent degradation trend
 
 # decorative ground vehicles: (asset, cx, cy, target_height)
 DECOR = [

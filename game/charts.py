@@ -21,7 +21,7 @@ def _grid(fig: go.Figure) -> None:
                      linecolor=config.COL["panel_edge"])
 
 
-def rul_chart(pred_df, reveal_truth: bool, height: int = 230) -> go.Figure:
+def rul_chart(pred_df, reveal_truth: bool, height: int = 320) -> go.Figure:
     """pred_df columns: cycle, predicted_rul, true_rul.
 
     Predicted line is always shown. The hidden True-RUL line is only revealed
@@ -60,21 +60,57 @@ def rul_chart(pred_df, reveal_truth: bool, height: int = 230) -> go.Figure:
         **_DARK,
     )
     fig.update_xaxes(title="Cycles")
-    fig.update_yaxes(title="RUL", rangemode="tozero")
+    ymax = 140
+    if len(pred_df):
+        ymax = max(40, int(max(pred_df["predicted_rul"].max(), pred_df["true_rul"].max()) // 10 * 10 + 20))
+    fig.update_yaxes(title="RUL", range=[0, ymax], dtick=10)
     _grid(fig)
     return fig
 
 
-def sensor_chart(sensor_df, label: str, height: int = 230) -> go.Figure:
+def sensor_chart(sensor_df, label: str, window: int, height: int = 380) -> go.Figure:
     fig = go.Figure()
+    if sensor_df.empty:
+        fig.update_layout(height=height, showlegend=False, **_DARK)
+        return fig
+
+    trend = sensor_df["sensor_value"].rolling(5, min_periods=1).mean()
     fig.add_trace(go.Scatter(
         x=sensor_df["cycle"], y=sensor_df["sensor_value"],
-        mode="lines", line=dict(color=config.COL["accent"], width=2),
+        mode="lines+markers", line=dict(color=config.COL["accent"], width=2),
+        marker=dict(size=4),
         fill="tozeroy", fillcolor="rgba(54,194,246,0.08)",
-        name=label,
+        name="sensor",
     ))
-    fig.update_layout(height=height, showlegend=False, **_DARK)
+    fig.add_trace(go.Scatter(
+        x=sensor_df["cycle"], y=trend,
+        mode="lines", line=dict(color=config.COL["warning"], width=2, dash="dot"),
+        name="5-cycle trend",
+    ))
+    ymin = float(sensor_df["sensor_value"].min())
+    ymax = float(sensor_df["sensor_value"].max())
+    span = ymax - ymin
+    # Most CMAPSS sensors move subtly; a tight recent-window range makes
+    # degradation visible without falsifying the values.
+    pad = max(span * 0.08, abs((ymin + ymax) / 2) * 0.0012, 0.08)
+    y_min = ymin - pad
+    y_max = ymax + pad
+    y_span = max(y_max - y_min, 0.01)
+    dtick = max(y_span / 16, 0.02)
+    fig.update_layout(
+        height=height, showlegend=True,
+        legend=dict(orientation="h", y=1.12, x=0, bgcolor="rgba(0,0,0,0)"),
+        **_DARK,
+    )
     fig.update_xaxes(title="Cycles")
-    fig.update_yaxes(title=label, rangemode="normal")
+    fig.update_yaxes(
+        title=label, range=[y_min, y_max], dtick=dtick,
+        tickformat=".3f", nticks=18,
+    )
+    fig.add_annotation(
+        text=f"Последние {window} циклов",
+        xref="paper", yref="paper", x=1, y=1.08,
+        showarrow=False, font=dict(color=config.COL["ink_dim"], size=10),
+    )
     _grid(fig)
     return fig

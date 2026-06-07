@@ -1,4 +1,4 @@
-aircraft_id,engine_id,model_name,engine_model,cmapss_unit,total_life,start_cycle
-PADII-101,ENG-037,XJ-100,PD-100,39,128,96
-PADII-202,ENG-048,XJ-200,PD-200,79,199,171
-PADII-303,ENG-059,XJ-300,PD-300,69,362,336
+aircraft_id,engine_id,model_name,engine_model,cmapss_unit,dataset_split,total_life,max_available_cycle,min_observed_true_rul,max_observed_true_rul,model_family,feature_count,start_cycle
+PADII-101,ENG-037,XJ-100,PD-100,87,train_FD001_holdout,178,178,0,138,lev_week6_oof_residual,384,158
+PADII-202,ENG-048,AirDrake,PD-200,79,train_FD001_holdout,199,199,0,159,lev_week6_oof_residual,384,179
+PADII-303,ENG-059,XJ-300,PD-300,75,train_FD001_holdout,229,229,0,189,lev_week6_oof_residual,384,209
