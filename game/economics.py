@@ -25,6 +25,13 @@ def _game_over(reason: str) -> dict:
     return report
 
 
+def _record_error(abs_error: float) -> None:
+    """Accumulate |predicted - true| for the campaign MAE (running sum/count)."""
+    stats = st.session_state["stats"]
+    stats["errors_sum"] += abs_error
+    stats["errors_count"] += 1
+
+
 def _mark_game_over_if_negative() -> None:
     if st.session_state["budget"] < 0:
         st.session_state["game_over"] = True
@@ -89,7 +96,7 @@ def continue_flight(aircraft_id: str) -> dict | None:
         )
         s["result"] = report
         st.session_state["stats"]["crashes"] += 1
-        st.session_state["stats"]["errors"].append(abs(pred_at_decision - tr))
+        _record_error(abs(pred_at_decision - tr))
         st.session_state["report"] = report
         state.advance_departure()
         return report
@@ -107,7 +114,7 @@ def continue_flight(aircraft_id: str) -> dict | None:
         )
         s["result"] = report
         st.session_state["stats"]["crashes"] += 1
-        st.session_state["stats"]["errors"].append(abs(pred_at_decision - 0))
+        _record_error(abs(pred_at_decision - 0))
         st.session_state["report"] = report
         state.advance_departure()
         return report
@@ -134,7 +141,7 @@ def send_to_maintenance(aircraft_id: str) -> dict:
     s["status"] = "maintained"
     s["service_turns_remaining"] = config.MAINTENANCE_TURNS
     st.session_state["stats"]["maintenances"] += 1
-    st.session_state["stats"]["errors"].append(abs(pred_at_decision - tr))
+    _record_error(abs(pred_at_decision - tr))
 
     # classify outcome by the *true* remaining life at decision time
     if tr <= 12:
