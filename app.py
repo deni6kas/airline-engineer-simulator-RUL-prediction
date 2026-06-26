@@ -316,7 +316,7 @@ def render_tour() -> None:
         " animation:tourpulse 1.15s ease-in-out infinite !important; }"
     )
     st.markdown(f"<div class='tour-block'></div><style>{glow}"
-                "@media (max-width:900px){.block-container{padding-bottom:160px!important;}}"
+                "@media (max-width:900px){.block-container{padding-bottom:200px!important;}}"
                 "</style>",
                 unsafe_allow_html=True)
     st.markdown(f"""
@@ -343,24 +343,29 @@ def render_tour() -> None:
         pass
 
     st.markdown("<span id='tour-ctrl-anchor'></span>", unsafe_allow_html=True)
-    nav1, nav2 = st.columns(2)
-    with nav1:
-        if st.button("◀ Назад", key="tour_back", use_container_width=True,
-                     disabled=step == 0):
-            st.session_state["tour_step"] = step - 1
+    # All tour buttons must live inside ONE Streamlit sibling block so the fixed
+    # CSS anchor (+ div) captures Back, Skip, and Next together on mobile.
+    _pad_l, controls, _pad_r = st.columns([0.02, 0.96, 0.02])
+    with controls:
+        nav1, nav2 = st.columns(2)
+        with nav1:
+            if st.button("◀ Назад", key="tour_back", use_container_width=True,
+                         disabled=step == 0):
+                st.session_state["tour_step"] = step - 1
+                st.rerun()
+        with nav2:
+            if st.button("Пропустить", key="tour_skip", use_container_width=True):
+                _end_tour()
+                st.rerun()
+        last = step == total - 1
+        if st.button("Начать игру ✓" if last else "Далее ▶", key="tour_next",
+                     type="primary", use_container_width=True):
+            if last:
+                _end_tour()
+            else:
+                st.session_state["tour_step"] = step + 1
             st.rerun()
-    with nav2:
-        if st.button("Пропустить", key="tour_skip", use_container_width=True):
-            _end_tour()
-            st.rerun()
-    last = step == total - 1
-    if st.button("Начать игру ✓" if last else "Далее ▶", key="tour_next",
-                 type="primary", use_container_width=True):
-        if last:
-            _end_tour()
-        else:
-            st.session_state["tour_step"] = step + 1
-        st.rerun()
+    st.markdown("<span id='tour-ctrl-end'></span>", unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------------- FLEET PANEL

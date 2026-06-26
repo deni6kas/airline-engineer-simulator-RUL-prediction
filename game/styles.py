@@ -332,13 +332,19 @@ div.element-container:has(#tour-ctrl-anchor) + div {{
   display:flex !important;
   flex-direction:column !important;
   gap:8px !important;
+  padding-bottom:env(safe-area-inset-bottom, 0px);
 }}
 div.element-container:has(#tour-ctrl-anchor) + div [data-testid="stHorizontalBlock"] {{
   gap:8px !important;
+  width:100% !important;
+}}
+div.element-container:has(#tour-ctrl-anchor) + div .stButton {{
+  width:100% !important;
 }}
 div.element-container:has(#tour-ctrl-anchor) + div button {{
   min-height:46px !important;
   font-size:18px !important;
+  width:100% !important;
 }}
 
 /* ---- responsive mobile/tablet layout ---- */
@@ -501,7 +507,7 @@ iframe[title*="streamlit_image_coordinates"] {{
   .tour-card {{
     top:max(12px, env(safe-area-inset-top, 12px));
     bottom:auto;
-    max-height:calc(100vh - 220px);
+    max-height:calc(100vh - 260px);
     width:calc(100vw - 20px);
     padding:14px 16px 12px 16px;
   }}
@@ -516,6 +522,9 @@ iframe[title*="streamlit_image_coordinates"] {{
   div.element-container:has(#tour-ctrl-anchor) + div button {{
     min-height:44px !important;
     font-size:16px !important;
+  }}
+  div.element-container:has(#tour-ctrl-end) {{
+    display:none !important;
   }}
 
   /* departure timer + console */
@@ -577,7 +586,7 @@ iframe[title*="streamlit_image_coordinates"] {{
     font-size:30px;
   }}
   .tour-card {{
-    max-height:calc(100vh - 200px);
+    max-height:calc(100vh - 240px);
   }}
   div.element-container:has(#tour-ctrl-anchor) + div [data-testid="stHorizontalBlock"] {{
     flex-direction:row !important;
