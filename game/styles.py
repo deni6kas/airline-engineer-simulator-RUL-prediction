@@ -310,6 +310,9 @@ div.element-container:has(#notice-ok-anchor) + div {{
   background:linear-gradient(180deg,var(--panel2),var(--panel));
   color:var(--ink); padding:18px 22px 16px 22px;
   box-shadow:0 18px 60px rgba(0,0,0,.6), 0 0 0 2px #0b1018 inset;
+  max-height:calc(100vh - 200px);
+  overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
 }}
 .tour-card .tour-step {{
   font-family:'Press Start 2P'; font-size:9px; color:var(--accent);
@@ -326,9 +329,16 @@ div.element-container:has(#tour-ctrl-anchor) + div {{
   position:fixed !important; z-index:11101 !important;
   left:50%; transform:translateX(-50%); bottom:40px;
   width:min(620px, calc(100vw - 40px)) !important;
+  display:flex !important;
+  flex-direction:column !important;
+  gap:8px !important;
+}}
+div.element-container:has(#tour-ctrl-anchor) + div [data-testid="stHorizontalBlock"] {{
+  gap:8px !important;
 }}
 div.element-container:has(#tour-ctrl-anchor) + div button {{
   min-height:46px !important;
+  font-size:18px !important;
 }}
 
 /* ---- responsive mobile/tablet layout ---- */
@@ -485,6 +495,96 @@ iframe[title*="streamlit_image_coordinates"] {{
   }}
   div.element-container:has(#report-summary-anchor) + div {{
     left:calc(50vw + 6px) !important;
+  }}
+
+  /* ---- guided tour: card top, buttons bottom (no overlap) ---- */
+  .tour-card {{
+    top:max(12px, env(safe-area-inset-top, 12px));
+    bottom:auto;
+    max-height:calc(100vh - 220px);
+    width:calc(100vw - 20px);
+    padding:14px 16px 12px 16px;
+  }}
+  .tour-card .tour-step {{ font-size:8px; }}
+  .tour-card h3 {{ font-size:11px; line-height:1.5; }}
+  .tour-card p {{ font-size:13px; line-height:1.5; }}
+  div.element-container:has(#tour-ctrl-anchor) + div {{
+    bottom:max(12px, env(safe-area-inset-bottom, 12px));
+    width:calc(100vw - 20px) !important;
+    gap:6px !important;
+  }}
+  div.element-container:has(#tour-ctrl-anchor) + div button {{
+    min-height:44px !important;
+    font-size:16px !important;
+  }}
+
+  /* departure timer + console */
+  .departure-card {{
+    flex-direction:column;
+    align-items:stretch;
+    gap:8px;
+    font-size:12px;
+  }}
+  .departure-card .timer {{
+    font-size:16px;
+    min-width:0;
+    width:100%;
+  }}
+
+  /* plotly charts */
+  [data-testid="stPlotlyChart"],
+  [data-testid="stPlotlyChart"] > div,
+  .js-plotly-plot {{
+    max-width:100% !important;
+    overflow-x:auto !important;
+  }}
+
+  .fleet-wait-card {{
+    width:calc(100vw - 24px);
+    padding:18px 16px;
+  }}
+  .fleet-wait-card p {{
+    font-size:16px;
+    line-height:1.5;
+  }}
+  .fleet-wait-card h3 {{
+    font-size:12px;
+  }}
+  .fleet-wait-timer {{
+    font-size:18px;
+    min-width:100px;
+    padding:10px 14px;
+  }}
+
+  .advice {{
+    font-size:12px;
+  }}
+  .badge {{
+    font-size:8px;
+    padding:3px 8px;
+  }}
+}}
+
+/* phone portrait — tighter layout */
+@media (max-width: 480px) {{
+  .hud > div:last-child {{
+    grid-template-columns:repeat(2, minmax(0, 1fr)) !important;
+  }}
+  .hud-title {{
+    font-size:10px;
+  }}
+  .metric .v.big {{
+    font-size:30px;
+  }}
+  .tour-card {{
+    max-height:calc(100vh - 200px);
+  }}
+  div.element-container:has(#tour-ctrl-anchor) + div [data-testid="stHorizontalBlock"] {{
+    flex-direction:row !important;
+  }}
+  div.element-container:has(#tour-ctrl-anchor) + div [data-testid="column"] {{
+    min-width:0 !important;
+    flex:1 1 50% !important;
   }}
 }}
 
