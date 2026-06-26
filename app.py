@@ -315,7 +315,9 @@ def render_tour() -> None:
         " border-radius:8px !important;"
         " animation:tourpulse 1.15s ease-in-out infinite !important; }"
     )
-    st.markdown(f"<div class='tour-block'></div><style>{glow}</style>",
+    st.markdown(f"<div class='tour-block'></div><style>{glow}"
+                "@media (max-width:900px){.block-container{padding-bottom:160px!important;}}"
+                "</style>",
                 unsafe_allow_html=True)
     st.markdown(f"""
     <div class="tour-card">
@@ -329,25 +331,30 @@ def render_tour() -> None:
     # if this ever degrades.
     try:
         components.html(
-            "<script>const d=window.parent.document,"
-            f"e=d.querySelector(`{selector}`);"
-            "if(e)e.scrollIntoView({behavior:'smooth',block:'center'});</script>",
+            "<script>"
+            "const d=window.parent.document,w=window.parent.innerWidth;"
+            f"const e=d.querySelector(`{selector}`);"
+            "if(e)e.scrollIntoView({behavior:'smooth',"
+            "block:w<=600?'start':'center'});"
+            "</script>",
             height=0,
         )
     except Exception:
         pass
 
     st.markdown("<span id='tour-ctrl-anchor'></span>", unsafe_allow_html=True)
-    c1, c2, c3 = st.columns(3)
-    if c1.button("◀ Назад", key="tour_back", use_container_width=True,
-                 disabled=step == 0):
-        st.session_state["tour_step"] = step - 1
-        st.rerun()
-    if c2.button("Пропустить", key="tour_skip", use_container_width=True):
-        _end_tour()
-        st.rerun()
+    nav1, nav2 = st.columns(2)
+    with nav1:
+        if st.button("◀ Назад", key="tour_back", use_container_width=True,
+                     disabled=step == 0):
+            st.session_state["tour_step"] = step - 1
+            st.rerun()
+    with nav2:
+        if st.button("Пропустить", key="tour_skip", use_container_width=True):
+            _end_tour()
+            st.rerun()
     last = step == total - 1
-    if c3.button("Начать игру ✓" if last else "Далее ▶", key="tour_next",
+    if st.button("Начать игру ✓" if last else "Далее ▶", key="tour_next",
                  type="primary", use_container_width=True):
         if last:
             _end_tour()
