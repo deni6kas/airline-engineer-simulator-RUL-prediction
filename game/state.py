@@ -40,7 +40,9 @@ def _defaults() -> dict:
             "flights": 0,
             "maintenances": 0,
             "crashes": 0,
-            "errors": [],            # list of abs(pred-true) at decision time
+            # running aggregate of abs(pred-true) at decision time, used for MAE
+            "errors_sum": 0.0,
+            "errors_count": 0,
         },
         "level": 0,
         "xp": 0,
@@ -113,7 +115,6 @@ def start_departure(aircraft_id: str, rng: random.Random | None = None) -> None:
     st.session_state["decision_started_at"] = now
     st.session_state["decision_deadline"] = now + config.DECISION_SECONDS
     st.session_state["timer_paused_at"] = None
-    st.session_state["_expired_for"] = None
     st.session_state["sensor_mode"] = "grid"
     st.session_state["selected_sensor"] = None
 

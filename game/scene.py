@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import json
 from functools import lru_cache
+from io import BytesIO
 
+import streamlit as st
 from PIL import Image, ImageDraw
 
 from . import config
@@ -51,12 +53,10 @@ DEFAULT_LAYOUT = {
 }
 
 
-def load_layout() -> dict:
-    """Load editable scene placement from assets/scene_layout.json."""
+@lru_cache(maxsize=4)
+def _load_layout_cached(mtime: float) -> dict:
+    """Parse scene_layout.json. Cached per file mtime so edits invalidate it."""
     path = config.SCENE_LAYOUT_PATH
-    if not path.exists():
-        save_layout(DEFAULT_LAYOUT)
-        return json.loads(json.dumps(DEFAULT_LAYOUT))
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
@@ -66,6 +66,15 @@ def load_layout() -> dict:
     layout = json.loads(json.dumps(DEFAULT_LAYOUT))
     layout.update({k: v for k, v in data.items() if k in layout})
     return layout
+
+
+def load_layout() -> dict:
+    """Load editable scene placement from assets/scene_layout.json."""
+    path = config.SCENE_LAYOUT_PATH
+    if not path.exists():
+        save_layout(DEFAULT_LAYOUT)
+        return json.loads(json.dumps(DEFAULT_LAYOUT))
+    return _load_layout_cached(path.stat().st_mtime)
 
 
 def save_layout(layout: dict) -> None:
@@ -194,6 +203,33 @@ def render_airport(fleet, selected_id, status_map, ep_status_map):
         base.alpha_composite(eng, (max(0, ex), max(0, ey)))
 
     return base.convert("RGB"), hitboxes
+
+
+@st.cache_data(show_spinner=False, max_entries=32)
+def _render_airport_cached(fleet: tuple, selected_id, status_items: tuple,
+                           ep_items: tuple, layout_mtime: float):
+    """Composite once per distinct visual state. Keyed on fleet order, the
+    selected aircraft, every aircraft's (status, episode-status) and the layout
+    file mtime, so the scene is only recomputed when something actually changes.
+    Returns PNG bytes (cheaper to cache than a PIL image) plus the hit-boxes."""
+    img, hitboxes = render_airport(
+        list(fleet), selected_id, dict(status_items), dict(ep_items))
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue(), hitboxes
+
+
+def render_airport_cached(fleet, selected_id, status_map, ep_status_map):
+    """Cached wrapper around :func:`render_airport` (same return contract)."""
+    path = config.SCENE_LAYOUT_PATH
+    mtime = path.stat().st_mtime if path.exists() else 0.0
+    png, hitboxes = _render_airport_cached(
+        tuple(fleet), selected_id,
+        tuple(sorted(status_map.items())),
+        tuple(sorted(ep_status_map.items())),
+        mtime,
+    )
+    return Image.open(BytesIO(png)), hitboxes
 
 
 def hit_test(hitboxes, x: float, y: float):

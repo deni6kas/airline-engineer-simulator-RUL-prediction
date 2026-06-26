@@ -1,0 +1,4 @@
+# Dev-only dependencies. NOT needed at runtime (predictions are precomputed).
+# Used by scripts/precompute.py to regenerate data/precomputed_predictions.parquet.
+-r requirements.txt
+scikit-learn>=1.4

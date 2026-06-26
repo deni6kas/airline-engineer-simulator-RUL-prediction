@@ -12,7 +12,6 @@ from io import BytesIO
 
 import streamlit as st
 from PIL import Image
-from streamlit_autorefresh import st_autorefresh
 from streamlit_image_coordinates import streamlit_image_coordinates
 
 from game import config, data_loader, economics, scene, state, charts
@@ -32,10 +31,6 @@ def _display_name(aircraft_id: str | None) -> str:
     if not aircraft_id:
         return "—"
     return config.aircraft_display_name(aircraft_id)
-
-
-def _rerun_app() -> None:
-    st.rerun(scope="app")
 
 
 ADVICE = {
@@ -97,6 +92,21 @@ def _fleet_card_sprite(aircraft_id: str) -> str:
     return sprites["card"]
 
 
+@st.cache_data(show_spinner=False, max_entries=128)
+def _rul_figure(aid: str, variant: str, cycle: int, reveal: bool):
+    pred_df = data_loader.prediction_series(aid, variant, cycle)
+    return charts.rul_chart(pred_df, reveal_truth=reveal, height=330)
+
+
+@st.cache_data(show_spinner=False, max_entries=128)
+def _sensor_figure(aid: str, sensor_key: str, cycle: int):
+    df = data_loader.sensor_series(aid, sensor_key, cycle).tail(
+        config.SENSOR_WINDOW_CYCLES)
+    label = data_loader.load_sensor_catalog()[sensor_key]["label"]
+    return charts.sensor_chart(df, label, window=config.SENSOR_WINDOW_CYCLES,
+                               height=380)
+
+
 def render_notice():
     notice = st.session_state.get("notice")
     if not notice:
@@ -112,6 +122,7 @@ def render_notice():
     st.button("OK", key="notice_ok", on_click=clear_notice)
 
 
+@st.fragment(run_every=1.0)
 def render_fleet_unavailable_overlay():
     if st.session_state.get("fleet_unavailable_until") is None:
         return
@@ -120,7 +131,8 @@ def render_fleet_unavailable_overlay():
         return
     remaining = state.fleet_unavailable_remaining()
     if remaining <= 0:
-        st.session_state["_pending_fleet_resume"] = True
+        state.finish_fleet_unavailable_wait()
+        st.rerun()
         return
     st.markdown(f"""
     <div class="fleet-wait-overlay">
@@ -311,7 +323,7 @@ def render_map(fleet):
             status_map[aid] = config.STATUS_CRITICAL
         else:
             status_map[aid] = state.status(aid)
-    img, hitboxes = scene.render_airport(
+    img, hitboxes = scene.render_airport_cached(
         fleet, st.session_state["selected_aircraft"], status_map, ep_map)
 
     if st.session_state.get("report"):
@@ -339,36 +351,37 @@ def render_map(fleet):
 
 
 # ---------------------------------------------------------------- CONSOLE
-def _live_tick_needed() -> bool:
-    if st.session_state.get("screen") != "airport":
-        return False
-    if st.session_state.get("game_over"):
-        return False
-    if state.notification_active():
-        return False
-    if st.session_state.get("decision_deadline") is not None:
-        return True
-    return st.session_state.get("fleet_unavailable_until") is not None
+def _tick_decision(aid: str | None) -> bool:
+    """Per-second timer heartbeat shared by the timer fragments.
 
-
-def _sync_timer_state(aid: str | None) -> None:
+    Keeps the pause/resume state in sync and auto-dispatches the outbound
+    flight once the 20s window elapses. Returns True when an auto-dispatch
+    happened so the caller can trigger a full app rerun.
+    """
     if state.notification_active():
         state.pause_timer()
-    elif st.session_state.get("timer_paused_at") is not None:
+        return False
+    if st.session_state.get("timer_paused_at") is not None:
         state.resume_timer()
-    if not aid:
-        return
-    if (
-        state.decision_time_expired()
-        and st.session_state.get("_expired_for") != aid
-        and not state.notification_active()
-        and not st.session_state.get("_pending_auto_flight")
-    ):
-        st.session_state["_expired_for"] = aid
-        st.session_state["_pending_auto_flight"] = aid
+    if aid and state.decision_time_expired():
+        economics.continue_flight(aid)
+        return True
+    return False
 
 
+@st.fragment(run_every=1.0)
+def _decision_timer_tick(aid: str):
+    """Invisible heartbeat used when the active flight is not the selected one,
+    so its timer keeps running without rerendering the whole page."""
+    if _tick_decision(aid):
+        st.rerun()
+
+
+@st.fragment(run_every=1.0)
 def render_live_departure_timer(aid: str):
+    if _tick_decision(aid):
+        st.rerun()
+        return
     remaining = state.remaining_seconds()
     destination = st.session_state.get("destination") or "Unknown"
     paused = st.session_state.get("timer_paused_at") is not None
@@ -456,8 +469,7 @@ def render_console(aid):
 
     # --- middle: RUL chart
     with mid:
-        pred_df = data_loader.prediction_series(aid, st.session_state["mode"], s["cycle"])
-        fig = charts.rul_chart(pred_df, reveal_truth=done, height=330)
+        fig = _rul_figure(aid, st.session_state["mode"], s["cycle"], done)
         st.plotly_chart(fig, use_container_width=True,
                         config={"displayModeBar": False}, key=f"rul_{aid}")
 
@@ -491,15 +503,7 @@ def render_sensor_area(aid):
                 st.rerun()
 
     key = st.session_state.get("selected_sensor") or keys[0]
-    df = data_loader.sensor_series(aid, key, s["cycle"]).tail(
-        config.SENSOR_WINDOW_CYCLES
-    )
-    fig = charts.sensor_chart(
-        df,
-        catalog[key]["label"],
-        window=config.SENSOR_WINDOW_CYCLES,
-        height=380,
-    )
+    fig = _sensor_figure(aid, key, s["cycle"])
     st.plotly_chart(fig, use_container_width=True,
                     config={"displayModeBar": False}, key=f"sens_{aid}_{key}")
 
@@ -599,8 +603,8 @@ def render_report():
 def render_summary():
     s = st.session_state
     stats = s["stats"]
-    errs = stats["errors"]
-    mae = sum(errs) / len(errs) if errs else 0.0
+    err_count = stats["errors_count"]
+    mae = stats["errors_sum"] / err_count if err_count else 0.0
     profit = s["budget"] - config.START_BUDGET
 
     st.markdown("<div class='lobby-hero'><div class='t'>CAMPAIGN SUMMARY</div></div>",
@@ -649,17 +653,18 @@ def render_summary():
 
 
 # ---------------------------------------------------------------- ROUTER
-def _process_pending_auto_flight() -> None:
-    pending = st.session_state.pop("_pending_auto_flight", None)
-    if pending and not state.notification_active():
-        economics.continue_flight(pending)
-
-
 def render_airport_screen():
-    if _live_tick_needed():
-        st_autorefresh(interval=1000, key="game_tick")
-    _sync_timer_state(st.session_state.get("current_departure"))
-    _process_pending_auto_flight()
+    current = st.session_state.get("current_departure")
+    # Drive the decision timer from a lightweight heartbeat. When the active
+    # flight is the selected one, its visible timer fragment (in the console)
+    # owns the tick; otherwise an invisible heartbeat keeps it running.
+    if (
+        not st.session_state.get("game_over")
+        and st.session_state.get("decision_deadline") is not None
+        and current
+        and current != st.session_state["selected_aircraft"]
+    ):
+        _decision_timer_tick(current)
     render_hud()
     fleet = list(data_loader.fleet_ids())
     top = st.columns([3, 1])
@@ -675,9 +680,6 @@ def render_airport_screen():
 
 
 def main():
-    if st.session_state.pop("_pending_fleet_resume", False):
-        state.finish_fleet_unavailable_wait()
-        _rerun_app()
     screen = st.session_state["screen"]
     if screen == "lobby":
         render_lobby()
@@ -688,7 +690,10 @@ def main():
     else:
         render_airport_screen()
     render_notice()
-    render_fleet_unavailable_overlay()
+    # Only mount the fleet-wait fragment (with its 1s heartbeat) while a wait is
+    # actually in progress, so idle screens never tick.
+    if st.session_state.get("fleet_unavailable_until") is not None:
+        render_fleet_unavailable_overlay()
 
 
 main()
