@@ -8,13 +8,18 @@ visible in dollars. No model is trained at runtime.
 from __future__ import annotations
 
 import base64
+import importlib
+import time
 from io import BytesIO
 
 import streamlit as st
+import streamlit.components.v1 as components
 from PIL import Image
 from streamlit_image_coordinates import streamlit_image_coordinates
 
 from game import config, data_loader, economics, scene, state, charts
+importlib.reload(charts)
+from game.charts import rul_chart, sensor_chart
 from game.styles import CSS
 
 st.set_page_config(page_title=config.GAME_TITLE, page_icon="✈", layout="wide")
@@ -95,7 +100,7 @@ def _fleet_card_sprite(aircraft_id: str) -> str:
 @st.cache_data(show_spinner=False, max_entries=128)
 def _rul_figure(aid: str, variant: str, cycle: int, reveal: bool):
     pred_df = data_loader.prediction_series(aid, variant, cycle)
-    return charts.rul_chart(pred_df, reveal_truth=reveal, height=330)
+    return rul_chart(pred_df, reveal_truth=reveal, height=330)
 
 
 @st.cache_data(show_spinner=False, max_entries=128)
@@ -103,8 +108,8 @@ def _sensor_figure(aid: str, sensor_key: str, cycle: int):
     df = data_loader.sensor_series(aid, sensor_key, cycle).tail(
         config.SENSOR_WINDOW_CYCLES)
     label = data_loader.load_sensor_catalog()[sensor_key]["label"]
-    return charts.sensor_chart(df, label, window=config.SENSOR_WINDOW_CYCLES,
-                               height=380)
+    return sensor_chart(df, label, window=config.SENSOR_WINDOW_CYCLES,
+                        height=380)
 
 
 def render_notice():
@@ -232,40 +237,123 @@ def render_lobby():
             </div>""", unsafe_allow_html=True)
             t1, t2 = st.columns(2)
             if t1.button("Пройти обучение", type="primary", use_container_width=True):
-                st.session_state["screen"] = "tutorial"
-                st.session_state["mode"] = pending_mode
-                st.session_state["tutorial_prompt"] = False
+                start_campaign(pending_mode)
+                st.session_state["tour_active"] = True
+                st.session_state["tour_step"] = 0
                 st.rerun()
             if t2.button("Пропустить", use_container_width=True):
                 start_campaign(pending_mode)
                 st.rerun()
 
 
-def render_tutorial():
-    st.markdown("""
-    <div class="lobby-hero">
-      <div class="t">TRAINING GUIDE</div>
-      <div class="s">Короткий briefing перед первой сменой инженера</div>
-    </div>
-    <div class="panel tutorial-card">
-      <h4>Как играть</h4>
-      <p><b>1. Outbound Flight</b> — сверху в консоли показан текущий рейс,
-      город назначения и таймер 20 секунд.</p>
-      <p><b>2. Графики</b> — RUL/ML prediction и сенсоры доступны сразу.
-      Истинный RUL раскрывается только после ТО или отказа.</p>
-      <p><b>3. Платные подсказки</b> — точное Predicted RUL и System Advice
-      покупаются отдельно по $50,000. Если денег не хватает, появится уведомление.</p>
-      <p><b>4. Решение</b> — отправьте рейс или снимите двигатель на ТО.
-      После таймера ТО блокируется, и рейс уходит поздно.</p>
-      <p><b>5. Бюджет</b> — компания не может уйти в минус. Для ТО и аварийных
-      штрафов это может завершить кампанию.</p>
-    </div>
-    """, unsafe_allow_html=True)
-    c1, c2, c3 = st.columns([1, 2, 1])
-    with c2:
-        if st.button("Понятно, начать кампанию", type="primary", use_container_width=True):
-            start_campaign(st.session_state.get("mode", "baseline"))
-            st.rerun()
+# ---------------------------------------------------------------- GUIDED TOUR
+# Each step: (target selector key, title, explanation). Special keys map to the
+# anchored Streamlit elements below; plain CSS selectors are used as-is.
+TOUR_STEPS = [
+    (".hud", "Панель управления",
+     "Здесь бюджет компании, уровень инженера (XP) и выбранная ML-модель. "
+     "Главная цель — заработать и не увести бюджет в минус: одна авария стоит "
+     "−$5,000,000."),
+    (".fleet-card", "Флот самолётов",
+     "Ваши борты. Кликайте по карточке справа или по самолёту на карте, чтобы "
+     "осмотреть его. Но решение принимается только по текущему рейсу (Outbound)."),
+    (".departure-card", "Таймер рейса",
+     "На решение по текущему рейсу даётся 20 секунд. Не успели — борт улетает "
+     "сам, на свой риск. Сейчас таймер на паузе: идёт обучение."),
+    ("__rulchart__", "Прогноз RUL",
+     "Главный сигнал: предсказанный остаточный ресурс двигателя (в циклах) от "
+     "ML-модели. Зоны Safe / Warning / Critical показывают, насколько близко "
+     "до отказа."),
+    ("__buyhint__", "Платные подсказки",
+     "Точное число Predicted RUL и текстовый совет ML-инженера можно купить за "
+     "$50,000 каждый. Быстро и надёжно, но тратит бюджет."),
+    ("__sensors__", "Сенсоры — бесплатно",
+     "Телеметрия двигателя: температура, обороты, давление. По трендам можно "
+     "самому оценить износ и решить без покупки подсказки."),
+    ("__flight__", "Отправить в рейс",
+     "+$5,000 за рейс, но двигатель теряет 1 цикл ресурса. Если ресурс кончится "
+     "в полёте — авария и штраф −$5,000,000. Жадность наказуема."),
+    ("__maint__", "Отправить на ТО",
+     "−$50,000, и борт уходит на ремонт на несколько кругов. Безопасно, но "
+     "слишком раннее ТО — потеря выручки. Баланс риска и прибыли — суть игры."),
+]
+
+# st.columns / st.image are wrapped in stLayoutWrapper — use "+ div" not "+ div.element-container"
+_TOUR_SELECTORS = {
+    "__rulchart__": "div.element-container:has(#rulchart-anchor) + div",
+    "__buyhint__": "div.element-container:has(#buyhint-anchor) + div button",
+    "__sensors__": "div.element-container:has(.sensor-zone) + div button",
+    "__flight__": "div.element-container:has(#flight-anchor) + div button",
+    "__maint__": "div.element-container:has(#maint-anchor) + div button",
+}
+
+
+def _end_tour() -> None:
+    st.session_state["tour_active"] = False
+    st.session_state["tour_step"] = 0
+    # give the player a fresh, unpaused decision window
+    st.session_state["timer_paused_at"] = None
+    if st.session_state.get("decision_deadline") is not None:
+        st.session_state["decision_deadline"] = time.time() + config.DECISION_SECONDS
+
+
+def render_tour() -> None:
+    if not st.session_state.get("tour_active"):
+        return
+    total = len(TOUR_STEPS)
+    step = max(0, min(st.session_state.get("tour_step", 0), total - 1))
+    key, title, text = TOUR_STEPS[step]
+    selector = _TOUR_SELECTORS.get(key, key)
+
+    # dim layer + pulsing spotlight on the current target (lifted above the dim,
+    # but click-through so the game can't be touched mid-tour)
+    glow = (
+        ".stApp " + selector + " {"
+        " position:relative !important; z-index:11050 !important;"
+        " pointer-events:none !important;"
+        " outline:3px solid var(--accent) !important; outline-offset:3px;"
+        " border-radius:8px !important;"
+        " animation:tourpulse 1.15s ease-in-out infinite !important; }"
+    )
+    st.markdown(f"<div class='tour-block'></div><style>{glow}</style>",
+                unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="tour-card">
+      <div class="tour-step">Обучение · шаг {step + 1} из {total}</div>
+      <h3>{title}</h3>
+      <p>{text}</p>
+    </div>""", unsafe_allow_html=True)
+
+    # scroll the highlighted element into view (srcdoc iframe is same-origin,
+    # so it can reach the parent document). Best-effort: the tour still works
+    # if this ever degrades.
+    try:
+        components.html(
+            "<script>const d=window.parent.document,"
+            f"e=d.querySelector(`{selector}`);"
+            "if(e)e.scrollIntoView({behavior:'smooth',block:'center'});</script>",
+            height=0,
+        )
+    except Exception:
+        pass
+
+    st.markdown("<span id='tour-ctrl-anchor'></span>", unsafe_allow_html=True)
+    c1, c2, c3 = st.columns(3)
+    if c1.button("◀ Назад", key="tour_back", use_container_width=True,
+                 disabled=step == 0):
+        st.session_state["tour_step"] = step - 1
+        st.rerun()
+    if c2.button("Пропустить", key="tour_skip", use_container_width=True):
+        _end_tour()
+        st.rerun()
+    last = step == total - 1
+    if c3.button("Начать игру ✓" if last else "Далее ▶", key="tour_next",
+                 type="primary", use_container_width=True):
+        if last:
+            _end_tour()
+        else:
+            st.session_state["tour_step"] = step + 1
+        st.rerun()
 
 
 # ---------------------------------------------------------------- FLEET PANEL
@@ -308,7 +396,7 @@ def render_fleet_panel(fleet):
                      use_container_width=True):
             st.session_state["selected_aircraft"] = aid
             st.session_state["sensor_mode"] = "grid"
-            st.rerun()
+            st.rerun(scope="fragment")
     st.markdown("</div>", unsafe_allow_html=True)
 
 
@@ -343,7 +431,7 @@ def render_map(fleet):
             if hit and hit != st.session_state["selected_aircraft"]:
                 st.session_state["selected_aircraft"] = hit
                 st.session_state["sensor_mode"] = "grid"
-                st.rerun()
+                st.rerun(scope="fragment")
     st.markdown("<div class='legend'>Кликни по самолёту на карте или в списке справа · "
                 "Статус: <b class='s'>Safe</b> RUL&gt;20 · "
                 "<b class='w'>Warning</b> 5–20 · <b class='c'>Critical</b> &lt;5</div>",
@@ -355,17 +443,30 @@ def _tick_decision(aid: str | None) -> bool:
     """Per-second timer heartbeat shared by the timer fragments.
 
     Keeps the pause/resume state in sync and auto-dispatches the outbound
-    flight once the 20s window elapses. Returns True when an auto-dispatch
-    happened so the caller can trigger a full app rerun.
+    flight once the 20s window elapses. Returns True when state changed in a
+    way that needs a full app rerun.
     """
-    if state.notification_active():
+    if state.fleet_wait_active():
+        return False
+    if st.session_state.get("tour_active") or state.notification_active():
         state.pause_timer()
         return False
     if st.session_state.get("timer_paused_at") is not None:
         state.resume_timer()
-    if aid and state.decision_time_expired():
-        economics.continue_flight(aid)
+    if not aid or not state.decision_time_expired():
+        return False
+
+    before_departure = st.session_state.get("current_departure")
+    report = economics.continue_flight(aid)
+    if report is not None:
         return True
+    if st.session_state.get("current_departure") != before_departure:
+        return True
+    if st.session_state.get("report"):
+        return True
+    # Timer expired but the flight could not run (e.g. stale deadline) — do not
+    # spin reruns every second.
+    state.clear_decision_timer()
     return False
 
 
@@ -396,6 +497,19 @@ def render_live_departure_timer(aid: str):
       <div class="timer">{timer_text}</div>
     </div>""", unsafe_allow_html=True)
 def render_departure_brief(aid: str, is_current: bool):
+    if state.fleet_wait_active():
+        remaining = state.fleet_unavailable_remaining()
+        st.markdown(f"""
+        <div class="departure-card paused">
+          <div>
+            <b>FLEET PAUSE</b><br>
+            Все борта прошли ТО — рейсы возобновятся через <span>{remaining:02d}s</span>.
+            Осмотрите обновлённую телеметрию, таймер решений отключён.
+          </div>
+          <div class="timer">{remaining:02d}s</div>
+        </div>""", unsafe_allow_html=True)
+        return
+
     if not is_current:
         current = _display_name(st.session_state.get("current_departure"))
         st.markdown(f"""
@@ -442,10 +556,12 @@ def render_console(aid):
             m2.markdown("<div class='metric locked'><div class='k'>Predicted RUL</div>"
                         "<div class='v big'>LOCKED</div>"
                         "<div class='k'>buy for $50k</div></div>", unsafe_allow_html=True)
-            if is_current and st.button(f"Купить Predicted RUL −{money(config.HINT_COST)}",
-                                        key=f"buy_rul_{aid}", use_container_width=True):
-                economics.buy_rul_hint(aid)
-                st.rerun()
+            if is_current:
+                st.markdown("<span id='buyhint-anchor'></span>", unsafe_allow_html=True)
+                if st.button(f"💳 Купить Predicted RUL −{money(config.HINT_COST)}",
+                             key=f"buy_rul_{aid}", use_container_width=True):
+                    economics.buy_rul_hint(aid)
+                    st.rerun()
 
         if advice_revealed:
             st.markdown(f"<div style='margin:8px 0'><span class='badge {BADGE[stt]}'>"
@@ -462,16 +578,19 @@ def render_console(aid):
                         "Текстовая подсказка скрыта. Решайте по графикам сенсоров "
                         "или купите консультацию ML-инженера.</div>",
                         unsafe_allow_html=True)
-            if is_current and st.button(f"Купить текстовую подсказку −{money(config.HINT_COST)}",
-                                        key=f"buy_advice_{aid}", use_container_width=True):
-                economics.buy_advice_hint(aid)
-                st.rerun()
+            if is_current:
+                st.markdown("<span id='buyhint-anchor'></span>", unsafe_allow_html=True)
+                if st.button(f"💳 Купить текстовую подсказку −{money(config.HINT_COST)}",
+                             key=f"buy_advice_{aid}", use_container_width=True):
+                    economics.buy_advice_hint(aid)
+                    st.rerun()
 
     # --- middle: RUL chart
     with mid:
+        st.markdown("<span id='rulchart-anchor'></span>", unsafe_allow_html=True)
         fig = _rul_figure(aid, st.session_state["mode"], s["cycle"], done)
         st.plotly_chart(fig, use_container_width=True,
-                        config={"displayModeBar": False}, key=f"rul_{aid}")
+                        config={"displayModeBar": False}, key="rul_chart")
 
     # --- bottom: sensor controls + actions (wide, not cramped on the side)
     st.markdown("<div class='console-bottom'>", unsafe_allow_html=True)
@@ -500,12 +619,12 @@ def render_sensor_area(aid):
                          key=f"sensor_{key}", use_container_width=True):
                 st.session_state["selected_sensor"] = key
                 st.session_state["sensor_mode"] = "detail"
-                st.rerun()
+                st.rerun(scope="fragment")
 
     key = st.session_state.get("selected_sensor") or keys[0]
     fig = _sensor_figure(aid, key, s["cycle"])
     st.plotly_chart(fig, use_container_width=True,
-                    config={"displayModeBar": False}, key=f"sens_{aid}_{key}")
+                    config={"displayModeBar": False}, key="sensor_chart")
 
 
 def render_action_center(aid, done):
@@ -517,6 +636,12 @@ def render_action_center(aid, done):
         if st.button("📊 Итоги кампании", use_container_width=True, key="summary_game_over"):
             st.session_state["screen"] = "summary"
             st.rerun()
+        return
+    if state.fleet_wait_active():
+        st.info(
+            "Рейсы на паузе: все борта прошли ТО. Осмотрите обновлённую телеметрию — "
+            "решения по рейсам станут доступны после окончания перерыва."
+        )
         return
     ac = state.ac_state(aid)
     if ac["status"] == "maintained":
@@ -548,14 +673,15 @@ def render_action_center(aid, done):
     flight_label = "✈  DISPATCH LATE" if expired else f"✈  CONTINUE FLIGHT  +{money(config.FLIGHT_REVENUE)[1:]}"
     if st.button(flight_label,
                  type="primary", use_container_width=True, key="continue_flight"):
-        report = economics.continue_flight(aid)
-        if report is None:
-            st.rerun()
+        economics.continue_flight(aid)
+        # full app rerun so the report/notice overlays in main() render
+        st.rerun()
 
     st.markdown("<span id='maint-anchor'></span>", unsafe_allow_html=True)
     if st.button(f"🔧  SEND TO MAINTENANCE  −$50,000",
                  use_container_width=True, key="maintenance", disabled=expired):
         economics.send_to_maintenance(aid)
+        st.rerun()
 
     st.markdown("<div class='fleet-sub' style='margin-top:6px'>Следующий рейс "
                 "уменьшит истинный ресурс на 1 цикл.</div>", unsafe_allow_html=True)
@@ -653,13 +779,17 @@ def render_summary():
 
 
 # ---------------------------------------------------------------- ROUTER
+@st.fragment
 def render_airport_screen():
+    # The whole interactive airport is one fragment: selecting another aircraft
+    # (map/fleet/sensor) reruns only this region (st.rerun(scope="fragment")),
+    # so the page no longer fully reloads on a switch. Money/report/screen
+    # actions still use full reruns so the report/notice overlays in main()
+    # update.
     current = st.session_state.get("current_departure")
-    # Drive the decision timer from a lightweight heartbeat. When the active
-    # flight is the selected one, its visible timer fragment (in the console)
-    # owns the tick; otherwise an invisible heartbeat keeps it running.
     if (
         not st.session_state.get("game_over")
+        and not state.fleet_wait_active()
         and st.session_state.get("decision_deadline") is not None
         and current
         and current != st.session_state["selected_aircraft"]
@@ -676,19 +806,20 @@ def render_airport_screen():
     aid = st.session_state["selected_aircraft"]
     if aid:
         render_console(aid)
-    render_report()
 
 
 def main():
     screen = st.session_state["screen"]
     if screen == "lobby":
         render_lobby()
-    elif screen == "tutorial":
-        render_tutorial()
     elif screen == "summary":
         render_summary()
     else:
         render_airport_screen()
+        # rendered outside the airport fragment so report buttons (incl. the
+        # "Итоги кампании" navigation) drive a full app rerun and route correctly
+        render_report()
+        render_tour()
     render_notice()
     # Only mount the fleet-wait fragment (with its 1s heartbeat) while a wait is
     # actually in progress, so idle screens never tick.

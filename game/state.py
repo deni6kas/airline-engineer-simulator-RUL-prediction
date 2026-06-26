@@ -23,6 +23,8 @@ def _defaults() -> dict:
         "report": None,              # dict report currently shown
         "notice": None,
         "tutorial_prompt": False,
+        "tour_active": False,        # interactive guided tour overlay on airport
+        "tour_step": 0,
         "pending_mode": None,
         "game_over": False,
         "game_over_reason": None,
@@ -58,6 +60,7 @@ def init_state() -> None:
         st.session_state.get("screen") == "airport"
         and st.session_state.get("aircraft_states")
         and not st.session_state.get("current_departure")
+        and not st.session_state.get("fleet_unavailable_until")
     ):
         fleet = list(st.session_state["aircraft_states"].keys())
         st.session_state["departure_queue"] = fleet
@@ -187,12 +190,36 @@ def _maintained_fleet_exists() -> bool:
 
 
 def _start_fleet_unavailable_wait() -> None:
+    """Pause outbound decisions while the fleet is entirely in the shop.
+
+    Engines are reset immediately (post-TO RUL/cycle) so the player can inspect
+    refreshed telemetry during the break; only the departure timer stays off
+    until the wait elapses.
+    """
     st.session_state["current_departure"] = None
     st.session_state["destination"] = None
     st.session_state["decision_deadline"] = None
     st.session_state["timer_paused_at"] = None
+    _reset_all_maintained_engines()
     if st.session_state.get("fleet_unavailable_until") is None:
-        st.session_state["fleet_unavailable_until"] = time.time() + config.FLEET_UNAVAILABLE_SECONDS
+        st.session_state["fleet_unavailable_until"] = (
+            time.time() + config.FLEET_UNAVAILABLE_SECONDS
+        )
+
+
+def _reset_all_maintained_engines() -> None:
+    for aid, ac in st.session_state["aircraft_states"].items():
+        if ac["status"] == "maintained":
+            _reset_aircraft_engine(aid)
+
+
+def fleet_wait_active() -> bool:
+    return st.session_state.get("fleet_unavailable_until") is not None
+
+
+def clear_decision_timer() -> None:
+    st.session_state["decision_deadline"] = None
+    st.session_state["timer_paused_at"] = None
 
 
 def fleet_unavailable_remaining() -> int:
@@ -203,15 +230,12 @@ def fleet_unavailable_remaining() -> int:
 
 
 def finish_fleet_unavailable_wait() -> None:
-    for aid, ac in st.session_state["aircraft_states"].items():
-        if ac["status"] == "maintained":
-            _reset_aircraft_engine(aid)
+    st.session_state["fleet_unavailable_until"] = None
     queue = [
         aid for aid, ac in st.session_state["aircraft_states"].items()
         if not ac["episode_done"]
     ]
     st.session_state["departure_queue"] = queue
-    st.session_state["fleet_unavailable_until"] = None
     if queue:
         start_departure(queue[0])
 
