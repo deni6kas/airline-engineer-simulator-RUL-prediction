@@ -4,8 +4,6 @@ from . import config
 C = config.COL
 
 CSS = f"""
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap');
 
@@ -139,16 +137,16 @@ CSS = f"""
   margin-top:12px; padding-top:10px; border-top:1px solid var(--edge);
   color:var(--dim); font-size:12px;
 }}
-div.element-container:has(#report-ok-anchor) + div.element-container {{
+div.element-container:has(#report-ok-anchor) + div {{
   position:fixed; z-index:10000; left:calc(50% - 260px); bottom:calc(50% - 205px);
   width:240px !important;
 }}
-div.element-container:has(#report-summary-anchor) + div.element-container {{
+div.element-container:has(#report-summary-anchor) + div {{
   position:fixed; z-index:10000; left:calc(50% + 20px); bottom:calc(50% - 205px);
   width:240px !important;
 }}
-div.element-container:has(#report-ok-anchor) + div.element-container button,
-div.element-container:has(#report-summary-anchor) + div.element-container button {{
+div.element-container:has(#report-ok-anchor) + div button,
+div.element-container:has(#report-summary-anchor) + div button {{
   min-height:54px !important;
 }}
 
@@ -203,24 +201,34 @@ div.element-container:has(#report-summary-anchor) + div.element-container button
   border:2px solid var(--edge); }}
 .stButton > button[kind="primary"] {{ border-color:{C['primary_edge']};
   box-shadow:0 3px 0 {C['primary_edge']}; }}
-/* maintenance danger button (anchored) */
-div.element-container:has(#maint-anchor) + div.element-container button {{
-  background:{C['danger']} !important; color:#fff !important;
-  border-color:#7e2f2b !important; box-shadow:0 3px 0 #7e2f2b !important;
+/* maintenance danger button (anchored) — high-contrast red */
+div.element-container:has(#maint-anchor) + div button {{
+  background:linear-gradient(180deg,#ff5a52,{C['critical']}) !important;
+  color:#fff !important; font-weight:bold !important;
+  border-color:#7e2f2b !important;
+  box-shadow:0 4px 0 #7e2f2b, 0 0 14px rgba(239,77,77,.45) !important;
+  text-shadow:0 1px 2px rgba(0,0,0,.5) !important;
 }}
-div.element-container:has(#flight-anchor) + div.element-container button {{
+/* paid hint buttons (anchored) — gold "spend for info" accent */
+div.element-container:has(#buyhint-anchor) + div button {{
+  background:linear-gradient(180deg,#ffd76a,{C['gold']}) !important;
+  color:#2a210a !important; font-weight:bold !important;
+  border-color:#b8901f !important;
+  box-shadow:0 4px 0 #b8901f, 0 0 12px rgba(242,193,78,.4) !important;
+}}
+div.element-container:has(#flight-anchor) + div button {{
   font-size:24px !important; padding:10px 0 !important;
   min-height:76px !important;
 }}
-div.element-container:has(#maint-anchor) + div.element-container button {{
+div.element-container:has(#maint-anchor) + div button {{
   min-height:76px !important;
 }}
-div.element-container:has(#summary-anchor) + div.element-container button {{
+div.element-container:has(#summary-anchor) + div button {{
   min-height:58px !important;
 }}
 
 /* sensor tiles */
-div.element-container:has(.sensor-zone) + div.element-container button {{
+div.element-container:has(.sensor-zone) + div button {{
   height:70px; font-size:18px; background:var(--panel2);
 }}
 
@@ -276,13 +284,51 @@ div.element-container:has(.sensor-zone) + div.element-container button {{
   font-family:'Press Start 2P';
   font-size:18px;
 }}
-div.element-container:has(#notice-ok-anchor) + div.element-container {{
+div.element-container:has(#notice-ok-anchor) + div {{
   position:fixed;
   z-index:11001;
   left:50%;
   transform:translateX(-50%);
   bottom:calc(50% - 132px);
   width:180px !important;
+}}
+
+/* ---- interactive guided tour ---- */
+@keyframes tourpulse {{
+  0%, 100% {{ box-shadow:0 0 0 3px var(--accent), 0 0 18px 6px rgba(54,194,246,.55); }}
+  50% {{ box-shadow:0 0 0 3px var(--accent), 0 0 34px 12px rgba(54,194,246,.95); }}
+}}
+.tour-block {{
+  position:fixed; inset:0; z-index:11000;
+  background:rgba(4, 8, 14, .55); backdrop-filter:blur(1px);
+}}
+.tour-card {{
+  position:fixed; z-index:11100;
+  left:50%; transform:translateX(-50%); bottom:108px;
+  width:min(620px, calc(100vw - 40px));
+  border:2px solid var(--accent); border-radius:12px;
+  background:linear-gradient(180deg,var(--panel2),var(--panel));
+  color:var(--ink); padding:18px 22px 16px 22px;
+  box-shadow:0 18px 60px rgba(0,0,0,.6), 0 0 0 2px #0b1018 inset;
+}}
+.tour-card .tour-step {{
+  font-family:'Press Start 2P'; font-size:9px; color:var(--accent);
+  letter-spacing:1px; margin-bottom:8px;
+}}
+.tour-card h3 {{
+  margin:0 0 8px 0; font-family:'Press Start 2P'; font-size:13px; color:var(--gold);
+}}
+.tour-card p {{ margin:0; font-size:14px; line-height:1.55; color:var(--ink); }}
+/* tour control buttons (anchored, fixed at the bottom of the card).
+   st.columns is wrapped in stLayoutWrapper, so target the next div (any),
+   not specifically div.element-container. */
+div.element-container:has(#tour-ctrl-anchor) + div {{
+  position:fixed !important; z-index:11101 !important;
+  left:50%; transform:translateX(-50%); bottom:40px;
+  width:min(620px, calc(100vw - 40px)) !important;
+}}
+div.element-container:has(#tour-ctrl-anchor) + div button {{
+  min-height:46px !important;
 }}
 
 /* ---- responsive mobile/tablet layout ---- */
@@ -360,11 +406,11 @@ iframe[title*="streamlit_image_coordinates"] {{
   .stButton > button {{
     font-size:18px;
   }}
-  div.element-container:has(#flight-anchor) + div.element-container button,
-  div.element-container:has(#maint-anchor) + div.element-container button {{
+  div.element-container:has(#flight-anchor) + div button,
+  div.element-container:has(#maint-anchor) + div button {{
     min-height:58px !important;
   }}
-  div.element-container:has(.sensor-zone) + div.element-container button {{
+  div.element-container:has(.sensor-zone) + div button {{
     height:58px;
     font-size:16px;
   }}
@@ -411,7 +457,7 @@ iframe[title*="streamlit_image_coordinates"] {{
     padding:22px 18px 78px 18px;
     font-size:20px;
   }}
-  div.element-container:has(#notice-ok-anchor) + div.element-container {{
+  div.element-container:has(#notice-ok-anchor) + div {{
     bottom:calc(50% - 126px);
   }}
 
@@ -429,15 +475,15 @@ iframe[title*="streamlit_image_coordinates"] {{
     font-size:11px;
     line-height:1.6;
   }}
-  div.element-container:has(#report-ok-anchor) + div.element-container,
-  div.element-container:has(#report-summary-anchor) + div.element-container {{
+  div.element-container:has(#report-ok-anchor) + div,
+  div.element-container:has(#report-summary-anchor) + div {{
     position:fixed;
     z-index:10000;
     left:12px !important;
     width:calc(50vw - 18px) !important;
     bottom:12px !important;
   }}
-  div.element-container:has(#report-summary-anchor) + div.element-container {{
+  div.element-container:has(#report-summary-anchor) + div {{
     left:calc(50vw + 6px) !important;
   }}
 }}

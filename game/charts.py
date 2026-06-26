@@ -29,10 +29,8 @@ def rul_chart(pred_df, reveal_truth: bool, height: int = 320) -> go.Figure:
     """
     fig = go.Figure()
 
-    # status bands
     xs = pred_df["cycle"]
     if len(xs):
-        x0, x1 = int(xs.min()), int(xs.max()) + 1
         fig.add_hrect(y0=config.SAFE_MIN, y1=200, fillcolor=config.COL["safe"],
                       opacity=0.06, line_width=0)
         fig.add_hrect(y0=config.WARNING_MIN, y1=config.SAFE_MIN,
@@ -62,7 +60,8 @@ def rul_chart(pred_df, reveal_truth: bool, height: int = 320) -> go.Figure:
     fig.update_xaxes(title="Cycles")
     ymax = 140
     if len(pred_df):
-        ymax = max(40, int(max(pred_df["predicted_rul"].max(), pred_df["true_rul"].max()) // 10 * 10 + 20))
+        ymax = max(40, int(max(pred_df["predicted_rul"].max(),
+                               pred_df["true_rul"].max()) // 10 * 10 + 20))
     fig.update_yaxes(title="RUL", range=[0, ymax], dtick=10)
     _grid(fig)
     return fig
@@ -87,11 +86,10 @@ def sensor_chart(sensor_df, label: str, window: int, height: int = 380) -> go.Fi
         mode="lines", line=dict(color=config.COL["warning"], width=2, dash="dot"),
         name="5-cycle trend",
     ))
+
     ymin = float(sensor_df["sensor_value"].min())
     ymax = float(sensor_df["sensor_value"].max())
     span = ymax - ymin
-    # Most CMAPSS sensors move subtly; a tight recent-window range makes
-    # degradation visible without falsifying the values.
     pad = max(span * 0.08, abs((ymin + ymax) / 2) * 0.0012, 0.08)
     y_min = ymin - pad
     y_max = ymax + pad
