@@ -41,38 +41,62 @@ def fleet_ids() -> tuple[str, ...]:
     return tuple(load_metadata()["aircraft_id"].tolist())
 
 
+@st.cache_data(show_spinner=False)
+def _prediction_index() -> dict:
+    """Precompute O(1) lookup structures from the predictions table.
+
+    - ``groups[(aircraft_id, variant)]`` -> cycle-sorted DataFrame
+      (columns: cycle, predicted_rul, true_rul) identical to the old filtered
+      result, so slicing by cycle reproduces ``prediction_series`` exactly.
+    - ``point[(aircraft_id, variant, cycle)]`` -> predicted_rul (float).
+    """
+    preds = load_predictions()
+    groups: dict[tuple[str, str], pd.DataFrame] = {}
+    point: dict[tuple[str, str, int], float] = {}
+    for (aid, variant), sub in preds.groupby(["aircraft_id", "model_variant"], sort=False):
+        sub = sub.sort_values("cycle")[["cycle", "predicted_rul", "true_rul"]].reset_index(drop=True)
+        groups[(aid, variant)] = sub
+        for cycle, pred in zip(sub["cycle"], sub["predicted_rul"]):
+            point.setdefault((aid, variant, int(cycle)), float(pred))
+    return {"groups": groups, "point": point}
+
+
+@st.cache_data(show_spinner=False)
+def _sensor_index() -> dict:
+    """``[(aircraft_id, sensor_name)] -> cycle-sorted DataFrame`` (cycle, sensor_value)."""
+    sensors = load_sensors()
+    groups: dict[tuple[str, str], pd.DataFrame] = {}
+    for (aid, name), sub in sensors.groupby(["aircraft_id", "sensor_name"], sort=False):
+        groups[(aid, name)] = (
+            sub.sort_values("cycle")[["cycle", "sensor_value"]].reset_index(drop=True)
+        )
+    return groups
+
+
 def predicted_rul(aircraft_id: str, cycle: int, variant: str) -> float | None:
     """Precomputed predicted RUL for a given aircraft / cycle / model variant."""
-    preds = load_predictions()
-    row = preds[(preds.aircraft_id == aircraft_id)
-                & (preds.cycle == cycle)
-                & (preds.model_variant == variant)]
-    if row.empty:
-        return None
-    return float(row.iloc[0]["predicted_rul"])
+    return _prediction_index()["point"].get((aircraft_id, variant, int(cycle)))
 
 
 def prediction_series(aircraft_id: str, variant: str, up_to_cycle: int) -> pd.DataFrame:
-    preds = load_predictions()
-    sub = preds[(preds.aircraft_id == aircraft_id)
-                & (preds.model_variant == variant)
-                & (preds.cycle <= up_to_cycle)].sort_values("cycle")
-    return sub[["cycle", "predicted_rul", "true_rul"]].reset_index(drop=True)
+    sub = _prediction_index()["groups"].get((aircraft_id, variant))
+    if sub is None:
+        return pd.DataFrame(columns=["cycle", "predicted_rul", "true_rul"])
+    return sub[sub["cycle"] <= up_to_cycle].reset_index(drop=True)
 
 
 def full_truth_series(aircraft_id: str, variant: str) -> pd.DataFrame:
-    preds = load_predictions()
-    sub = preds[(preds.aircraft_id == aircraft_id)
-                & (preds.model_variant == variant)].sort_values("cycle")
-    return sub[["cycle", "predicted_rul", "true_rul"]].reset_index(drop=True)
+    sub = _prediction_index()["groups"].get((aircraft_id, variant))
+    if sub is None:
+        return pd.DataFrame(columns=["cycle", "predicted_rul", "true_rul"])
+    return sub.reset_index(drop=True)
 
 
 def sensor_series(aircraft_id: str, sensor_key: str, up_to_cycle: int) -> pd.DataFrame:
-    sensors = load_sensors()
-    sub = sensors[(sensors.aircraft_id == aircraft_id)
-                  & (sensors.sensor_name == sensor_key)
-                  & (sensors.cycle <= up_to_cycle)].sort_values("cycle")
-    return sub[["cycle", "sensor_value"]].reset_index(drop=True)
+    sub = _sensor_index().get((aircraft_id, sensor_key))
+    if sub is None:
+        return pd.DataFrame(columns=["cycle", "sensor_value"])
+    return sub[sub["cycle"] <= up_to_cycle].reset_index(drop=True)
 
 
 def total_life(aircraft_id: str) -> int:
